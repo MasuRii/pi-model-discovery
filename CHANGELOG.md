@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added schema versioning for cache schema to prevent repeated cache invalidations. Fixes cache not being used when models metadata fetched from the endpoints do not contain reasoning metadata.
+
 ## [0.3.0] - 2026-07-03
 
 ### Added

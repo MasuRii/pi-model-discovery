@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { CacheManager, isCacheEntryFresh, isProviderCacheEntryFresh, NON_AUTHORITATIVE_RETRY_MS } from "../src/cache/manager.js";
+import { CacheManager, CURRENT_CACHE_SCHEMA_VERSION, isCacheEntryFresh, isProviderCacheEntryFresh, NON_AUTHORITATIVE_RETRY_MS } from "../src/cache/manager.js";
 import { CACHE_SCHEMA_VERSION, readCacheFile } from "../src/cache/json-store.js";
 import type { CacheEntry, DiscoveredModel } from "../src/cache/types.js";
 import type { ProviderConfigEntry } from "../src/config/types.js";
@@ -70,6 +70,30 @@ test("cache freshness rejects empty non-authoritative entries so transient start
 
   assert.equal(isCacheEntryFresh(emptyNonAuthoritative, now), false);
   assert.equal(isCacheEntryFresh(fallbackNonAuthoritative, now), true);
+});
+
+test("current-schema entries skip legacy migration validators and stay fresh", () => {
+  const now = new Date("2026-05-01T00:10:00.000Z");
+  // The current enrichment writer emits gpt-5* models without reasoning
+  // metadata when reasoning is false or the catalog match failed. Under the
+  // legacy validators such an entry was permanently stale, so cache-first
+  // startup registration never happened.
+  const gapModel: DiscoveredModel = {
+    ...model,
+    id: "gpt-5-codex-mini",
+    reasoning: false,
+  };
+  const currentEntry: CacheEntry = {
+    fetchedAt: "2026-05-01T00:09:00.000Z",
+    ttlMs: 60 * 60 * 1000,
+    authoritative: true,
+    models: [gapModel],
+    schemaVersion: CURRENT_CACHE_SCHEMA_VERSION,
+  };
+  const legacyEntry: CacheEntry = { ...currentEntry, schemaVersion: undefined };
+
+  assert.equal(isProviderCacheEntryFresh("test-provider", currentEntry, now), true);
+  assert.equal(isProviderCacheEntryFresh("test-provider", legacyEntry, now), false);
 });
 
 test("cache freshness rejects legacy entries that only contain global-default metadata", () => {
