@@ -27,6 +27,7 @@ export interface CacheEntry {
   ttlMs: number;
   authoritative: boolean;
   models: DiscoveredModel[];
+  schemaVersion?: number;
 }
 
 export interface CacheSchema {

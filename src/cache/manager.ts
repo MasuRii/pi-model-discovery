@@ -4,6 +4,7 @@ import { createEmptyCache, readCacheFile, writeCacheFile } from "./json-store.js
 import type { CacheEntry, CacheSchema, DiscoveredModel } from "./types.js";
 
 export const NON_AUTHORITATIVE_RETRY_MS = 5 * 60 * 1000;
+export const CURRENT_CACHE_SCHEMA_VERSION = 2;
 
 function hasLegacyGlobalDefaultOnlyMetadata(entry: CacheEntry): boolean {
   return entry.models.some((model) => {
@@ -66,14 +67,24 @@ function hasLegacyNonTextGenerationModels(entry: CacheEntry): boolean {
 }
 
 export function isCacheEntryFresh(entry: CacheEntry, now = new Date(), providerId?: string): boolean {
-  if (!entry.authoritative && entry.models.length === 0) return false;
-  if (hasLegacyGlobalDefaultOnlyMetadata(entry)) return false;
-  if (hasLegacyBlazeApiClaudeAnthropicOverrides(providerId, entry)) return false;
-  if (hasLegacyOpenAIReasoningCompatGaps(providerId, entry)) return false;
-  if (hasLegacyClaudeOpusThinkingLevelGaps(providerId, entry)) return false;
-  if (hasLegacyGlm52ThinkingLevelGaps(providerId, entry)) return false;
-  if (hasLegacyCatalogCacheOverlay(entry)) return false;
-  if (hasLegacyNonTextGenerationModels(entry)) return false;
+  // The legacy validators below are one-time migrations for entries written
+  // before the enrichment pipeline filled reasoning metadata itself. Gating
+  // them on schemaVersion prevents a permanent writer/validator mismatch: the
+  // current writer legitimately emits gap-pattern models without that
+  // metadata (non-reasoning gpt-5* variants, catalog-unmatched opus/glm
+  // ids), which would otherwise keep every freshly written entry stale and
+  // defeat cache-first startup registration entirely.
+  const isCurrentSchema = entry.schemaVersion === CURRENT_CACHE_SCHEMA_VERSION;
+  if (!isCurrentSchema) {
+    if (!entry.authoritative && entry.models.length === 0) return false;
+    if (hasLegacyGlobalDefaultOnlyMetadata(entry)) return false;
+    if (hasLegacyBlazeApiClaudeAnthropicOverrides(providerId, entry)) return false;
+    if (hasLegacyOpenAIReasoningCompatGaps(providerId, entry)) return false;
+    if (hasLegacyClaudeOpusThinkingLevelGaps(providerId, entry)) return false;
+    if (hasLegacyGlm52ThinkingLevelGaps(providerId, entry)) return false;
+    if (hasLegacyCatalogCacheOverlay(entry)) return false;
+    if (hasLegacyNonTextGenerationModels(entry)) return false;
+  }
   const fetchedAtMs = Date.parse(entry.fetchedAt);
   if (!Number.isFinite(fetchedAtMs)) return false;
   const maxAge = entry.authoritative ? entry.ttlMs : NON_AUTHORITATIVE_RETRY_MS;
@@ -127,6 +138,7 @@ export class CacheManager {
         ttlMs: provider.discovery.ttlMs ?? 2 * 60 * 60 * 1000,
         authoritative,
         models,
+        schemaVersion: CURRENT_CACHE_SCHEMA_VERSION,
       };
     }
     await writeCacheFile(this.cachePath, cache);
